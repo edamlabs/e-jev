@@ -1,8 +1,7 @@
-"""api.handlers: the failure tree mapped to TypeSafe's status codes, at the boundary only."""
+"""api/handlers: the failure tree mapped to TypeSafe's status codes, at the boundary only."""
 
 from typing import Final
 
-import structlog
 from litestar import Request, Response
 from litestar.exceptions import ValidationException
 from litestar.status_codes import (
@@ -13,9 +12,8 @@ from litestar.status_codes import (
 )
 from litestar.types import ExceptionHandlersMap
 
-from e_jev.core.errors import STATUSES, CapabilityError, RequestError, RetryableError, UnroutableError, ValidationError
-
-log = structlog.get_logger()
+from e_jev.infra.logger import logger
+from e_jev.models.error import STATUSES, CapabilityError, RequestError, RetryableError, UnroutableError, ValidationError
 
 
 def handle_invalid(_: Request, error: ValidationException) -> Response:
@@ -43,12 +41,12 @@ def handle_unsupported(_: Request, error: CapabilityError) -> Response:
 
 def handle_unroutable(request: Request, error: UnroutableError) -> Response:
     """The state or question is beyond every backend's budget: the fleet as configured cannot serve it."""
-    log.warning("unroutable", path=request.url.path, error=error.message)
+    logger.warning("unroutable", path=request.url.path, error=error.message)
     return Response({"detail": error.message}, status_code=HTTP_503_SERVICE_UNAVAILABLE)
 
 
 def handle_upstream(request: Request, error: RequestError) -> Response:
-    log.error("upstream_failed", path=request.url.path, error=error.message, exc_info=error)
+    logger.error("upstream failed", path=request.url.path, error=error.message, exc_info=error)
     return Response({"detail": error.message}, status_code=HTTP_502_BAD_GATEWAY)
 
 

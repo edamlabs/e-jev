@@ -4,11 +4,10 @@ from pathlib import Path
 
 import msgspec
 import pytest
-from tests import kit
 
-from e_jev.adapters.ports import Decider, OpenFleet
-from e_jev.core.settings import Settings
+from e_jev.infra.settings import Settings
 from e_jev.models.systemone import SystemOneRequest
+from tests import kit
 
 
 @pytest.fixture
@@ -17,38 +16,35 @@ def reader() -> kit.FakeReader:
 
 
 @pytest.fixture
-def deciders(reader: kit.FakeReader) -> dict[str, Decider]:
+def fleet(reader: kit.FakeReader) -> kit.FakeFleet:
     return kit.fleet_of(reader)
 
 
 @pytest.fixture
-def open_reader_fleet(reader: kit.FakeReader) -> OpenFleet:
-    return kit.open_fleet(kit.fleet_of(reader))
+def fleet_down() -> kit.FakeFleet:
+    return kit.fleet_of(kit.FakeReader(up=False))
 
 
 @pytest.fixture
-def open_fleet_down() -> OpenFleet:
-    return kit.open_fleet(kit.fleet_of(kit.FakeReader(up=False)))
+def fleet_failing() -> kit.FakeFleet:
+    return kit.fleet_of(kit.FailingReader())
 
 
 @pytest.fixture
-def open_fleet_failing() -> OpenFleet:
-    return kit.open_fleet(kit.fleet_of(kit.FailingReader()))
+def fleet_ratelimited() -> kit.FakeFleet:
+    return kit.fleet_of(kit.RateLimitedReader())
 
 
 @pytest.fixture
-def open_fleet_ratelimited() -> OpenFleet:
-    return kit.open_fleet(kit.fleet_of(kit.RateLimitedReader()))
-
-
-@pytest.fixture
-def open_fleet_overloaded() -> OpenFleet:
-    return kit.open_fleet(kit.fleet_of(kit.OverloadedReader()))
+def fleet_overloaded() -> kit.FakeFleet:
+    return kit.fleet_of(kit.OverloadedReader())
 
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(calibration=tmp_path / "calibration.json", model="m", env="dev")
+    return Settings(
+        JEV_CALIBRATION=tmp_path / "calibration.json", JEV_ENV="dev", JEV_READING_URL="http://reading/v1", JEV_READING_MODEL="m"
+    )
 
 
 @pytest.fixture

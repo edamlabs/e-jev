@@ -1,4 +1,4 @@
-"""models.extract: typed extraction, beyond Jev — a JSON Schema filled through Outlines."""
+"""models/extract: typed extraction, beyond Jev — a JSON Schema filled through Outlines."""
 
 from typing import Any
 

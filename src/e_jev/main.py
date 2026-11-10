@@ -1,38 +1,46 @@
-"""e-jev entrypoint: the composition root — the only module that names a concretion.
+"""e-jev entrypoint: the composition root of the service — the only module that knows the whole app.
 
-Routers enter by explicit registration; the lifespan opens the fleet and builds the engine.
-Granian calls `create_app` per worker.
+Routers enter by explicit registration; the lifespans open, in order, what the service talks to (trace exporter,
+decision log), the fleet of catalog backends, and the decision runner over it. Granian calls `create_app` per worker.
 """
 
-from functools import partial
+import logging
+from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
+from typing import Final
 
 from litestar import Litestar
 from litestar.datastructures import State
 from litestar.plugins.opentelemetry import OpenTelemetryConfig, OpenTelemetryPlugin
 
-from e_jev.adapters import fleet
-from e_jev.adapters.ports import OpenFleet
 from e_jev.api.deps import DEPENDENCIES
 from e_jev.api.handlers import HANDLERS
-from e_jev.api.lifespan import lifespan
+from e_jev.api.lifespan.engines import engines
+from e_jev.api.lifespan.logic import logic
+from e_jev.api.lifespan.providers import providers
 from e_jev.api.middlewares import MIDDLEWARES
 from e_jev.api.router import extract, health, systemone
-from e_jev.core.logger import setup_logger
-from e_jev.core.settings import Settings
-from e_jev.core.settings import settings as st
-from e_jev.core.telemetry import setup_telemetry
+from e_jev.infra.logger import setup
+from e_jev.infra.settings import Settings
+from e_jev.infra.settings import settings as st
+from e_jev.providers.drivers.telemetry.otlp import OtlpTelemetryDriver
+
+type Lifespan = Callable[[Litestar], AbstractAsyncContextManager[None]]
+
+LIFESPANS: Final[tuple[Lifespan, ...]] = (providers, engines, logic)
 
 
-def create_app(settings: Settings = st, open_fleet: OpenFleet = fleet.open_fleet) -> Litestar:
-    setup_logger(settings.env, settings.log_level)
-    provider = setup_telemetry(settings.otlp_endpoint, settings.otlp_project)
+def create_app(settings: Settings = st, *, lifespans: Sequence[Lifespan] = LIFESPANS) -> Litestar:
+    setup(env=settings.JEV_ENV, level=logging.getLevelNamesMapping()[settings.JEV_LOG_LEVEL])
+    telemetry = (
+        OtlpTelemetryDriver(endpoint=settings.JEV_OTLP_ENDPOINT, project=settings.JEV_OTLP_PROJECT) if settings.JEV_OTLP_ENDPOINT else None
+    )
     return Litestar(
         route_handlers=[*health.ROUTES, *systemone.ROUTES, *extract.ROUTES],
-        lifespan=[partial(lifespan, open_fleet=open_fleet)],
+        lifespan=list(lifespans),
         dependencies=DEPENDENCIES,
         middleware=list(MIDDLEWARES),
         exception_handlers=HANDLERS,
-        state=State({"settings": settings}),
-        plugins=[OpenTelemetryPlugin(OpenTelemetryConfig(tracer_provider=provider))] if provider else [],
-        on_shutdown=[provider.shutdown] if provider else [],
+        state=State({"settings": settings, "telemetry": telemetry}),
+        plugins=[OpenTelemetryPlugin(OpenTelemetryConfig(tracer_provider=telemetry.provider))] if telemetry else [],
     )

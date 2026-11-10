@@ -1,7 +1,7 @@
 import msgspec
 import pytest
 
-from e_jev.core.settings import Settings
+from e_jev.infra.settings import Settings
 from e_jev.models.calibration import Calibration, KindFit
 from e_jev.models.systemone import Choice, Noul, Question, QuestionKind, Score
 
@@ -21,12 +21,12 @@ def _fit(model: str = "m") -> KindFit:
 @pytest.mark.parametrize(("permutations", "applied"), [(1, True), (2, False)])
 async def test_calibration_load_fingerprint(settings: Settings, permutations: int, applied: bool) -> None:
     fitted = Calibration(permutations=1, backends={"reading": _fit()})
-    settings.calibration.write_bytes(msgspec.json.encode(fitted))
-    assert (Calibration.load(settings.calibration, permutations) == fitted) is applied
+    settings.JEV_CALIBRATION.write_bytes(msgspec.json.encode(fitted))
+    assert (Calibration.load(settings.JEV_CALIBRATION, permutations) == fitted) is applied
 
 
 async def test_calibration_load_missing(settings: Settings) -> None:
-    assert Calibration.load(settings.calibration, 1) is None
+    assert Calibration.load(settings.JEV_CALIBRATION, 1) is None
 
 
 async def test_calibration_temperature_answers_per_backend_and_model(settings: Settings) -> None:
@@ -52,7 +52,7 @@ async def test_question_kind_follows_the_readout(question: Question, kind: Quest
 
 
 async def test_calibration_load_unreadable_legacy_file(settings: Settings) -> None:
-    settings.calibration.write_bytes(
+    settings.JEV_CALIBRATION.write_bytes(
         b'{"permutations":1,"backends":{"reading":{"temperatures":{},"ece_before":{},"ece_after":{},"accuracy":{},"fitted":0,"held_out":0}}}'
     )
-    assert Calibration.load(settings.calibration, 1) is None
+    assert Calibration.load(settings.JEV_CALIBRATION, 1) is None

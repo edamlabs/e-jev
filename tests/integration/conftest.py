@@ -1,9 +1,9 @@
-"""Integration fixtures: a live e-jev (or Jev) endpoint, or the whole tier is skipped."""
+"""Integration fixtures: a live e-jev (or Jev) endpoint, or the whole tier is skipped — scenarios included."""
 
 import httpx
 import pytest
 
-from examples.triage.graph import TriageSettings
+from tests.integration.scenarios.triage.graph import TriageSettings
 
 
 @pytest.fixture(scope="session")

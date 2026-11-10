@@ -1,11 +1,22 @@
-"""models.systemone: the System One wire contract, mirroring TypeSafe's public API (docs.typesafe.ai/api)."""
+"""models/systemone: the System One wire contract, mirroring TypeSafe's public API (docs.typesafe.ai/api)."""
 
 from enum import StrEnum, auto
 from typing import Annotated, Any, Final
 
-from msgspec import Meta, Struct
+from msgspec import Meta, Struct, json
 
 type Json = str | dict[str, Any] | list[Any]
+
+
+def render_json(value: Json | None) -> str:
+    """A state, an instruction or a description as the text a model reads: strings as they are, structures indented."""
+    match value:
+        case str():
+            return value
+        case None:
+            return ""
+        case _:
+            return json.format(json.encode(value).decode(), indent=2)
 
 
 class NoulCriteria(Struct, frozen=True):
@@ -43,7 +54,7 @@ class QuestionKind(StrEnum):
     SCORE = auto()
 
     @classmethod
-    def of(cls, question: Question) -> "QuestionKind":
+    def of(cls, question: Question) -> QuestionKind:
         match question:
             case Choice(criteria=criteria) if len(criteria) > LETTERED:
                 return cls.CHOICE_WIDE

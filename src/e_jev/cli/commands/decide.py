@@ -1,4 +1,4 @@
-"""cli.commands.decide: driving adapter — parse the terminal, call `DecideService`, render. No rule lives here."""
+"""cli/commands/decide: driving adapter — parse the terminal, call `DecideService`, render. No rule lives here."""
 
 from pathlib import Path
 

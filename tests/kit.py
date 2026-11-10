@@ -1,23 +1,26 @@
-"""tests.kit: fleet doubles and builders shared by every tier — fixtures stay in conftest, code lives here."""
+"""tests/kit: fleet doubles and builders shared by every tier — fixtures stay in conftest, code lives here."""
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from json import dumps
-from typing import Any
+from typing import Any, ClassVar, Self
 from zlib import crc32
 
 import numpy as np
+from litestar import Litestar
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Response
 
-from e_jev.adapters.decider.reading import ReadingDecider
-from e_jev.adapters.ports import Decider, OpenFleet, Reader
-from e_jev.config.backends import READING, Backend, BackendKind, Language
-from e_jev.core.errors import OverloadedError, RateLimitedError, RequestError
-from e_jev.logic.dispatch import option_count
-from e_jev.models.decision import Decision
-from e_jev.models.reading import Scores
+from e_jev.api.lifespan.logic import logic
+from e_jev.api.lifespan.providers import providers
+from e_jev.logic.decision.routing import option_count
+from e_jev.logic.readout.decider import ReadoutDecider
+from e_jev.models.catalog import Backend, BackendKind, Language
+from e_jev.models.error import OverloadedError, RateLimitedError, RequestError
 from e_jev.models.systemone import Json, Question
+from e_jev.ports.decide import DecidePort, Decision
+from e_jev.ports.provider import Isolation, Locality, ProviderSpec, Workload
+from e_jev.ports.readout import ReadoutPort, Scores
 
 REFUSED = "readout refused"
 
@@ -27,8 +30,20 @@ class FakeReader:
 
     Labels are their characters' code points; the stop token is 0; a prompt is one token per word, by content."""
 
+    spec: ClassVar[ProviderSpec] = ProviderSpec("fake", Locality.EMBEDDED, Workload.CPU_BOUND, Isolation.LOOP)
+
     def __init__(self, up: bool = True) -> None:
         self.up = up
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def model(self) -> str:
+        return "m"
 
     @property
     def stop(self) -> int:
@@ -47,7 +62,11 @@ class FakeReader:
         return {"schema": sorted(schema)}
 
     async def health(self) -> bool:
-        return self.up
+        match self.up:
+            case True:
+                return True
+            case False:
+                raise RequestError(REFUSED)
 
 
 class FailingReader(FakeReader):
@@ -94,7 +113,31 @@ class FakeDecider:
                 raise error(REFUSED)
 
     async def health(self) -> bool:
-        return self.up
+        match self.up:
+            case True:
+                return True
+            case False:
+                raise RequestError(REFUSED)
+
+
+class FakeFleet:
+    """The fleet as the runner and the routes see it: members, and whether any answers."""
+
+    def __init__(self, members: Mapping[str, DecidePort]) -> None:
+        self.members = dict(members)
+
+    async def report(self) -> dict[str, bool]:
+        return {name: await self._up(member) for name, member in self.members.items()}
+
+    async def health(self) -> bool:
+        return any((await self.report()).values())
+
+    @staticmethod
+    async def _up(member: DecidePort) -> bool:
+        try:
+            return await member.health()
+        except RequestError:
+            return False
 
 
 def _json(payload: dict[str, Any], status: int) -> Response:
@@ -127,6 +170,12 @@ class FakeVllm:
                 return _json(
                     {"tokens": [1, 2, 3, 4, 5, 6, 7] if "messages" in request.json else [1, 2, 3], "count": 7, "max_model_len": 65536}, 200
                 )
+            case ("/v1/completions", "POST", True):
+                ids = request.json["logprob_token_ids"]
+                top = {f"token_id:{token}": -float(rank) for rank, token in enumerate(ids)}
+                return _json({"choices": [{"logprobs": {"top_logprobs": [top]}}]}, 200)
+            case ("/v1/chat/completions", "POST", True):
+                return _json({"choices": [{"message": {"content": dumps({"schema": request.json["response_format"]["type"]})}}]}, 200)
             case _:
                 return _json({"error": {"message": f"no route {request.path}"}}, 404)
 
@@ -136,17 +185,20 @@ def backend(backend_id: str, kind: BackendKind, *, languages: tuple[Language, ..
 
 
 def reading_spec(model: str = "m") -> Backend:
-    return READING.model_copy(update={"model": model})
+    return Backend(id="reading", kind=BackendKind.READING, url="http://reading", model=model)
 
 
-def fleet_of(reader: Reader, *, permutations: int = 1, concurrency: int = 4) -> dict[str, Decider]:
-    return {"reading": ReadingDecider(reader, reading_spec(), permutations=permutations, concurrency=concurrency)}
+def fleet_of(reader: ReadoutPort, *, permutations: int = 1, concurrency: int = 4) -> FakeFleet:
+    return FakeFleet({"reading": ReadoutDecider(reader, backend="reading", permutations=permutations, concurrency=concurrency)})
 
 
-@asynccontextmanager
-async def _as_fleet(deciders: Mapping[str, Decider]) -> AsyncIterator[Mapping[str, Decider]]:
-    yield deciders
+def lifespans_of(fleet: FakeFleet, specs: Sequence[Backend] | None = None) -> tuple[Callable[[Litestar], Any], ...]:
+    """The service's lifespans with the fleet replaced by `fleet`: providers and the runner stay the real ones."""
 
+    @asynccontextmanager
+    async def engines(app: Litestar) -> AsyncIterator[None]:
+        app.state.backends = tuple(specs or (reading_spec(),))
+        app.state.fleet = fleet
+        yield
 
-def open_fleet(deciders: Mapping[str, Decider]) -> OpenFleet:
-    return lambda _: _as_fleet(deciders)
+    return (providers, engines, logic)
