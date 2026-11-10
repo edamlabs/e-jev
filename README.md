@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://img.shields.io/badge/python-3.14-166b7e"><img src="https://img.shields.io/badge/python-3.14-166b7e" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/damvolkov/e-jev?color=166b7e" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/edamlabs/e-jev?color=166b7e" alt="License"></a>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@ TypeSafe's reference definitions; every answer is calibrated per (backend, quest
 
 ## Install
 
-    git clone https://github.com/damvolkov/e-jev && cd e-jev
+    git clone https://github.com/edamlabs/e-jev && cd e-jev
     cp .env.example .env       # JEV_BACKENDS=h2o-lightning-4b — or reading + its endpoint
     docker compose up -d --build
 
