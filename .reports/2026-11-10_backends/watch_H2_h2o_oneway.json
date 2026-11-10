@@ -1,0 +1,1 @@
+{"peak_rss_bytes": 6107758592, "peak_gpu_bytes": 25184698368, "baseline_gpu_bytes": 20881342464, "backend_gpu_bytes": 4303355904, "per_pid_gpu_bytes": {"7955": 1665138688, "8210": 1061158912, "1660347": 22458400768}, "seconds": 110.5}

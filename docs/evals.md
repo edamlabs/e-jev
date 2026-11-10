@@ -105,3 +105,36 @@ only WorkflowEvals counts for E1. Memory: per-process GPU high-water from `nvidi
 Pareto (memory vs WorkflowEvals mean; C1 dominates every usable point):
 
 ![backends](evals/backends.svg)
+
+## Decision backends, round 2 (2026-11-10)
+
+The catalog's candidates against the backend the house already runs, every one alone on the RTX 4090 (vLLM stopped
+15:46:54–16:25:37, TEI embed + reranker left as they live), same harness as round 1 (`scripts/backend_bench.py` +
+`scripts/evals_bakeoff.sh`). Raw runs, watch peaks, the stop/start windows and the bench-only Dockerfiles:
+`.reports/2026-11-10_backends/`. The reading arm ran beforehand on the shared vLLM, without a window.
+
+| config | evals mean | inv / cs / agt / sec | boolq / ag / banking77 / sst5 | es20 / es60 / xnli / tweets | ECE after (worst) | p95 c1 (s) | p95 c32 (s) | dec/s c32 |
+|---|---|---|---|---|---|---|---|---|
+| **A2** reading · Gemma 4 26B-A4B AWQ (vLLM 0.31) | **0.625** | 0.78 / 0.89 / 0.50 / 0.33 | 0.86 / 0.85 / 0.78 / 0.59 | 0.86 / 0.79 / 0.85 / 0.70 | 0.074 | 0.10 | 0.66 | 93.0 |
+| **H1** H2O-Lightning-4B v1.4.2 two-way | 0.549 | 0.44 / 0.83 / 0.58 / 0.33 | 0.89 / 0.89 / 0.94 / 0.61 | 0.86 / 0.83 / 0.80 / 0.76 | 0.080 | 0.05 | 1.03 | 57.6 |
+| **H2** H2O-Lightning-4B v1.4.2 one-way | 0.521 | 0.53 / 0.64 / 0.50 / 0.42 | 0.89 / 0.89 / 0.93 / 0.59 | 0.85 / 0.79 / 0.79 / 0.73 | 0.074 | 0.06 | 0.48 | 102.8 |
+| **T1** Torchcast Decision 4B v1.3.1 | 0.500 | 0.17 / 0.83 / 0.67 / 0.33 | 0.92 / 0.91 / 0.79 / 0.59 | 0.87 / 0.85 / 0.82 / 0.73 | **0.112** ✗ | 0.06 | 2.30 | 35.7 |
+| **C1** Clef-Flash Q4_K_M as deployed (`-ub 4096`) | 0.451 | **0.00** / 0.89 / 0.75 / 0.17 | 0.88 / 0.91 / 0.96 / 0.63 | 0.95 / 0.92 / 0.83 / 0.72 | 0.070 | 0.10 | 2.62 | 21.8 |
+
+Peak VRAM is not comparable across these servers (vLLM preallocates by `--gpu-memory-utilization`; PyTorch keeps its
+cache): the weights are 9.3 GB (H2O), ~9 GB (Torchcast), 6.9 GB at 32k (Clef).
+
+### What it decided
+
+- **The default is `reading` over the house vLLM.** Gemma 4 26B-A4B, already resident for everything else, leads
+  WorkflowEvals and throughput at no extra VRAM; it trails on wide choice (Banking77 0.78) and Spanish intents.
+- **Clef's 0.639 of round 1 is not what production served.** At the deployed `-ub 4096` it answers no invoice state
+  (24–37 k tokens): 0.451. The 0.639 needed `-ub` ≥ the prompt and 17.7 GB. It stays the best on wide choice and
+  Spanish intents, as an opt-in catalog entry.
+- **H2O-Lightning-4B is the dedicated backend**: the only 4B that reads every WorkflowEvals state (32k), Banking77
+  0.94, worst ECE 0.080 — the `gpu-h2o` alternative and the installer's GPU choice. Two-way over one-way: ahead on
+  Spanish (es60 0.83 vs 0.79) and customer_service, slower at c32; WorkflowEvals 0.549 vs 0.521 is within noise.
+- **Torchcast Decision 4B is rejected**: English-only by its card, states cut at 16 k tokens, one request at a time,
+  and its wide-choice ECE (0.112) fails the 0.10 bar.
+- JevBench v1.8 (2026-11-03, vendor-run) ranks Torchcast-4B capability 77.5, H2O-4B v1.1 75.0, Clef-Flash 63.8; on our
+  sets the order differs — our harness decides, the board only shortlists.
