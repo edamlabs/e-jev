@@ -1,0 +1,45 @@
+services:
+
+  h2o:
+    image: ejev-h2o:local
+    container_name: h2o
+    hostname: h2o
+    restart: unless-stopped
+    ipc: host
+    labels:
+      e-core.category: "ai"
+      e-core.port: "45165"
+    ports:
+      # 45165 — H2O-Lightning-4B decision model (ai)
+      - "${H2O_PORT:-45165}:8741"
+    volumes:
+      # `make pull` writes the pinned snapshot here (ejev pull): weights, shim, serve.sh.
+      - ../data/models:/models
+      - ../data/h2o/cache:/cache
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HOME=/cache
+      # bench 2026-11-10 (.reports/2026-11-10_backends): two-way, alone on the 4090 with TEI beside it.
+      - TWO_WAY=${H2O_TWO_WAY:-1}
+      - GPU_UTIL=${H2O_GPU_UTIL:-0.78}
+      - MAX_LEN=${H2O_MAX_LEN:-32768}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, compute, utility]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8741/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+    networks:
+      - e-core
+
+networks:
+  e-core:
+    external: true

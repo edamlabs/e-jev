@@ -3,7 +3,10 @@ PROJECT  ?= e-jev
 IMAGE    ?= ghcr.io/damvolkov/e-jev:latest
 COMPOSE  ?= $(HOME)/.config/compose
 UNITS    ?= $(HOME)/.config/systemd/user
-SERVICES ?= ejev vllm clef
+SERVICES ?= ejev
+### the card is one: these are installed, never enabled — `gpu-*` decides who holds it.
+GPU_SERVICES ?= clef h2o
+H2O_IMAGE ?= ejev-h2o:local
 TYPESAFE_NODE ?= @typesafe-ai/n8n-nodes-typesafe-ai@0.9.0
 EVALS_REV ?= 0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb
 EVALS_LIMIT ?= 12
@@ -26,17 +29,23 @@ SHELL := bash
 MAKEFLAGS += --no-print-directory
 
 ##### TARGETS #####
-.PHONY: help sync lint type arch test integration graph evals ejev-test check build deploy ui watch restart status logs calibrate
+.PHONY: help sync common common-check lint type arch test integration graph evals ejev-test check build up pull deploy ui watch restart status logs calibrate gpu-decide gpu-teach gpu-h2o gpu-human strata
 
 help:
-	@printf "$(BOLD)$(CYAN)$(PROJECT)$(RESET) $(GRAY)· typed decisions over vLLM · compose + systemd --user$(RESET)\n\n"
+	@printf "$(BOLD)$(CYAN)$(PROJECT)$(RESET) $(GRAY)· typed decisions over a catalog of backends · compose + systemd --user$(RESET)\n\n"
 	@awk 'BEGIN{FS=":.*##"} /^[a-z][a-zA-Z0-9_-]*:.*##/{printf "  $(GREEN)%-10s$(RESET) $(GRAY)%s$(RESET)\n",$$1,$$2}' $(MAKEFILE_LIST)
 
 sync: ## sync deps (main + dev)
 	@uv sync
 
+common: ## materialize the common spine (e-arkhetypo projects/python/common) into src/e_jev
+	@uv run python scripts/materialize.py
+
+common-check: ## fail when the materialized spine drifted from common
+	@uv run python scripts/materialize.py --check
+
 lint: ## ruff check + format check
-	@uv run ruff check src tests examples && uv run ruff format --check src tests examples
+	@uv run ruff check src tests scripts && uv run ruff format --check src tests scripts
 
 type: ## ty static types
 	@uv run ty check
@@ -55,7 +64,7 @@ ejev-test: ## the service in one shot: ready, one noul + one choice + one score,
 	@body=$$(mktemp); t0=$$(date +%s%N); curl -fsS -o $$body -X POST $(JEV_URL)/v1/systemone -H 'content-type: application/json' -d '$(JEV_TEST_BODY)'; ms=$$(( ( $$(date +%s%N) - t0 ) / 1000000 )); command -v jq >/dev/null && jq . $$body || cat $$body; rm -f $$body; printf "$(GRAY)· %s ms · $(JEV_URL)$(RESET)\n" "$$ms"
 
 graph: ## run the triage graph on one ticket: make graph "text"
-	@PYDANTIC_AI_NO_BANNER=1 uv run python -m examples.triage.graph "$(ARGS)"
+	@PYDANTIC_AI_NO_BANNER=1 uv run python -m tests.integration.scenarios.triage.graph "$(ARGS)"
 
 evals: ## TypeSafe's WorkflowEvals against e-jev (EVALS_LIMIT cases per workflow), scored against published Jev + LLMs
 	@[ -d $(EVALS_DIR) ] || git clone -q https://github.com/typesafe-ai/WorkflowEvals $(EVALS_DIR)
@@ -63,14 +72,22 @@ evals: ## TypeSafe's WorkflowEvals against e-jev (EVALS_LIMIT cases per workflow
 	@cd $(EVALS_DIR) && for w in $(WORKFLOWS); do TYPESAFE_API_KEY=local uv run python run.py $$w --base-url $(JEV_URL) --name e-jev --limit $(EVALS_LIMIT) --workers 2 | tail -2; done
 	@cd $(EVALS_DIR) && uv run --extra plot python $(CURDIR)/scripts/evals_compare.py
 
-check: lint type arch test ## every local gate
+check: common-check lint type arch test ## every local gate
 
-build: ## build the ejev image
+build: ## build the ejev image and H2O's engine image
 	@docker build -t $(IMAGE) .
+	@docker build -t $(H2O_IMAGE) deploy/h2o
 
-deploy: build ## install compose dirs + systemd units, enable and (re)start the stack
-	@for s in $(SERVICES); do mkdir -p $(COMPOSE)/$$s && cp deploy/$$s/compose.yml $(COMPOSE)/$$s/compose.yml && cp deploy/systemd/$$s.service $(UNITS)/$$s.service; done
-	@docker run --rm -v $(COMPOSE)/data:/d busybox sh -c 'mkdir -p /d/ejev && chmod 777 /d/ejev'
+up: ## installers: the root compose — JEV_BACKENDS (.env) picks the backends, their weights download, ejev on :45160
+	@docker compose up -d --build
+
+pull: ## this machine: the weights of the GPU backends into the shared data dir (ejev pull, pinned and verified)
+	@docker run --rm -v $(COMPOSE)/data:/d busybox sh -c 'mkdir -p /d/models && chown 65534 /d/models'
+	@docker run --rm -e JEV_BACKENDS=$(or $(ARGS),clef-flash,h2o-lightning-4b) -v $(COMPOSE)/data/models:/models $(IMAGE) ejev pull
+
+deploy: build pull ## install compose dirs + systemd units; enable and (re)start ejev, install the GPU backends disabled
+	@for s in $(SERVICES) $(GPU_SERVICES); do mkdir -p $(COMPOSE)/$$s && cp deploy/$$s/compose.yml $(COMPOSE)/$$s/compose.yml && cp deploy/systemd/$$s.service $(UNITS)/$$s.service; done
+	@docker run --rm -v $(COMPOSE)/data:/d busybox sh -c 'mkdir -p /d/ejev /d/h2o/cache && chmod 777 /d/ejev /d/h2o/cache'
 	@systemctl --user daemon-reload
 	@systemctl --user enable $(addsuffix .service,$(SERVICES))
 	@systemctl --user restart $(addsuffix .service,$(SERVICES))
@@ -100,18 +117,29 @@ strata: ## install the Strata compose dir + unit, never enabled: the card owner 
 	@systemctl --user daemon-reload
 	@printf "$(GREEN)✓ strata unit installed (disabled) — make gpu-human to hand it the card$(RESET)\n"
 
-gpu-decide: ## default serving pattern: decision model on the card, teacher stopped (clef + ejev)
-	@systemctl --user stop vllm.service strata.service
-	@systemctl --user start clef.service ejev.service
-	@printf "$(GREEN)✓ clef + ejev up — make gpu-teach for the vLLM teacher, gpu-human for Strata chat$(RESET)\n"
+gpu-teach: ## default pattern: the house vLLM (Gemma) on the card, ejev reads it — decision models off
+	@systemctl --user stop clef.service h2o.service strata.service
+	@rm -f $(COMPOSE)/ejev/.env
+	@systemctl --user start vllm.service
+	@systemctl --user restart ejev.service
+	@printf "$(GREEN)✓ vllm + ejev up — make gpu-h2o or gpu-decide hands the card to a decision model$(RESET)\n"
 
-gpu-teach: ## teacher pattern: vLLM on the card for extract/long context/fitting, decision model off
-	@systemctl --user stop clef.service strata.service
-	@systemctl --user start vllm.service ejev.service
-	@printf "$(GREEN)✓ vllm + ejev up$(RESET)\n"
+gpu-h2o: ## H2O-Lightning-4B on the card, vLLM stopped, ejev answers through it
+	@systemctl --user stop vllm.service clef.service strata.service
+	@echo JEV_BACKENDS=h2o-lightning-4b > $(COMPOSE)/ejev/.env
+	@systemctl --user start h2o.service
+	@systemctl --user restart ejev.service
+	@printf "$(GREEN)✓ h2o + ejev up (warm-up takes minutes: /ready names the backends) — make gpu-teach to go back$(RESET)\n"
+
+gpu-decide: ## Clef-Flash on the card, vLLM stopped, ejev answers through it
+	@systemctl --user stop vllm.service h2o.service strata.service
+	@echo JEV_BACKENDS=clef-flash > $(COMPOSE)/ejev/.env
+	@systemctl --user start clef.service
+	@systemctl --user restart ejev.service
+	@printf "$(GREEN)✓ clef + ejev up — make gpu-teach to go back$(RESET)\n"
 
 gpu-human: ## Strata on the card: 125B chat for webui/coders/cortexdb; jev stays up, its GPU routes degrade by design
-	@systemctl --user stop vllm.service clef.service
+	@systemctl --user stop vllm.service clef.service h2o.service
 	@systemctl --user start strata.service ejev.service
 	@printf "$(GREEN)✓ strata + jev up — webui on http://localhost:45300, OpenAI base http://strata:8080/v1$(RESET)\n"
 
@@ -120,7 +148,7 @@ restart: ## restart the fleet
 
 status: ## systemd + container health
 	@systemctl --user --no-pager status $(addsuffix .service,$(SERVICES)) | grep -E '●|Active'
-	@docker ps --filter name='^(vllm|ejev|clef)$$' --format '{{.Names}}\t{{.Status}}'
+	@docker ps --filter name='^(vllm|ejev|clef|h2o)$$' --format '{{.Names}}\t{{.Status}}'
 
 logs: ## follow logs: make logs [vllm|jev]
 	@journalctl --user -fu $(or $(ARGS),ejev).service
