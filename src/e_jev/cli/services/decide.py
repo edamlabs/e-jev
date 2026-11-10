@@ -1,4 +1,4 @@
-"""cli.services.decide: one System One request built from terminal input — no terminal, no rendering here."""
+"""cli/services/decide: one System One request built from terminal input — no terminal, no rendering here."""
 
 from enum import StrEnum, auto
 from pathlib import Path
@@ -8,8 +8,8 @@ import msgspec
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Noul, Score
 from typesafe_sdk._core.response_types import ListModelsResponse, SystemOneResponse
 
-from e_jev.core.errors import CliError
-from e_jev.core.telemetry import inject_headers
+from e_jev.models.error import CliError
+from e_jev.providers.drivers.telemetry.otlp import OtlpTelemetryDriver
 
 type Question = Noul | Choice | Score
 
@@ -109,7 +109,7 @@ class DecideService:
                 raise DecideFileError(path, "not a System One request: it needs `state` and a `questions` map")
 
     async def ask(self, state: Any, questions: dict[str, Question] | dict[str, Any], model: str | None = None) -> SystemOneResponse:
-        return await self._client.system_one(state, questions, model=model or self._model, extra_headers=inject_headers())
+        return await self._client.system_one(state, questions, model=model or self._model, extra_headers=OtlpTelemetryDriver.headers())
 
     async def models(self) -> ListModelsResponse:
         return await self._client.models.list()

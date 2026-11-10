@@ -1,4 +1,4 @@
-"""api.deps: request-scoped wiring — handlers receive typed objects, never the raw app state."""
+"""api/deps: request-scoped wiring — handlers receive typed branches, never the raw app state."""
 
 from enum import StrEnum
 from typing import Final
@@ -6,17 +6,23 @@ from typing import Final
 from litestar.datastructures import State
 from litestar.di import Provide
 
-from e_jev.core.settings import Settings
-from e_jev.operational.engine import Engine
+from e_jev.infra.settings import Settings
+from e_jev.logic.decision.runner import DecisionRunner
+from e_jev.models.catalog import Backend
 
 
 class DepKey(StrEnum):
-    ENGINE = "engine"
+    RUNNER = "runner"
+    BACKENDS = "backends"
     SETTINGS = "settings"
 
 
-def provide_engine(state: State) -> Engine:
-    return state.engine
+def provide_runner(state: State) -> DecisionRunner:
+    return state.runner
+
+
+def provide_backends(state: State) -> tuple[Backend, ...]:
+    return state.backends
 
 
 def provide_settings(state: State) -> Settings:
@@ -24,6 +30,7 @@ def provide_settings(state: State) -> Settings:
 
 
 DEPENDENCIES: Final[dict[str, Provide]] = {
-    DepKey.ENGINE.value: Provide(provide_engine, sync_to_thread=False),
+    DepKey.RUNNER.value: Provide(provide_runner, sync_to_thread=False),
+    DepKey.BACKENDS.value: Provide(provide_backends, sync_to_thread=False),
     DepKey.SETTINGS.value: Provide(provide_settings, sync_to_thread=False),
 }

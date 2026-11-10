@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://img.shields.io/badge/python-3.13-166b7e"><img src="https://img.shields.io/badge/python-3.13-166b7e" alt="Python"></a>
+  <a href="https://img.shields.io/badge/python-3.14-166b7e"><img src="https://img.shields.io/badge/python-3.14-166b7e" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/edamlabs/e-jev?color=166b7e" alt="License"></a>
 </p>
 
@@ -8,15 +8,19 @@
 </p>
 
 A self-hosted [Jev](https://docs.typesafe.ai): TypeSafe's System One API — typed, calibrated decisions
-instead of text, served by **Clef-Flash** (Cloudflare, Apache-2.0): a trained decision model, one
-forward pass, every option scored jointly — 6.9 GB, noul p50 38 ms, 20.6 decisions/s. It *beats* the
-generative reader it replaces on quality (WorkflowEvals 0.639 vs 0.573, Banking77 0.961, Spanish
-intents 0.93–0.95), so e-jev is clef and nothing else by default.
+instead of text — over a **catalog of decision backends**, chosen with one variable:
 
-Optionally, a generative **reader** (vLLM, or any OpenAI server speaking the vLLM logprob dialect —
-`/tokenize` + `/v1/completions` with `logprob_token_ids`) can be added to the fleet: exact option-letter
-logprobs renormalized over your options, which opens long states (> ~4k tokens), `/v1/extract`, and a
-distillation teacher. Without it, those answer 503/501 honestly — never silence.
+| `JEV_BACKENDS` | What answers | You bring |
+|---|---|---|
+| `reading` (default) | option-letter logprobs read from any LLM that speaks vLLM's dialect (`/tokenize` + `/v1/completions` with `logprob_token_ids`) — also `/v1/extract` | the endpoint: `JEV_READING_URL`, `JEV_READING_MODEL` |
+| `h2o-lightning-4b` | [H2O-Lightning-4B](https://huggingface.co/h2oai/h2o-lightning-4b) v1.4.2 (Apache-2.0), two-way attention, 32k states | an NVIDIA GPU (~9.3 GB of weights); the weights download themselves |
+| `clef-flash` | [Clef-Flash](https://huggingface.co/ggml-org/Clef-Flash-GGUF) Q4_K_M (Apache-2.0) on llama.cpp, states up to ~4k tokens | an NVIDIA GPU (6.9 GB); the weights download themselves |
+| `systemone` | any native `/v1/systemone` server — TypeSafe's Jev, Laya, Kev… | the endpoint: `JEV_SYSTEMONE_URL` |
+
+Several, comma-separated, make a fleet: preferred first, a question falls down the row when a backend fails or
+cannot serve its shape (language, option count, state length). A name outside the catalog stops the service at
+start and lists the valid ones; a selected backend without its endpoint stops it naming the variable. The reader
+needs logprobs: hosted APIs that hide them (Anthropic's, OpenAI's chat-only models) cannot be a `reading` backend.
 
 Part of the **EDamLabs eager series**: EDamLabs' own e- products ([EDamLabs families](https://github.com/edamlabs/esteward#identity)).
 
@@ -26,37 +30,27 @@ TypeSafe's reference definitions; every answer is calibrated per (backend, quest
 
 ## Install
 
-    docker pull ghcr.io/damvolkov/e-jev:latest
-    docker run -d --name jev -p 45160:45160 --network e-core ghcr.io/damvolkov/e-jev:latest
+    git clone https://github.com/edamlabs/e-jev && cd e-jev
+    cp .env.example .env       # JEV_BACKENDS=h2o-lightning-4b — or reading + its endpoint
+    docker compose up -d --build
 
-With Clef on the same machine (the default decision backend — its model downloads on first run):
+`COMPOSE_PROFILES` follows `JEV_BACKENDS` (`.env.example`), so one name selects the backend in e-jev and starts its
+server: `models` runs `ejev pull` (pinned Hub snapshots, verified, a no-op when complete), the backend's server
+warms up (H2O: minutes — its `/health` answers 503 until every path is warmed), then e-jev answers on `:45160`.
+`curl localhost:45160/ready` names every backend up or down. Requirements for a GPU backend: Docker with the
+NVIDIA container toolkit, Compose ≥ 2.20; H2O's engine image is built locally (vLLM 0.30.0 + H2O's two-way fork,
+checked file by file against the sums the model ships).
 
-    docker run -d --name clef --gpus all -p 45164:8080 \
-      -v ./clef-cache:/home/app/.cache/llama.cpp --network e-core \
-      --entrypoint /bin/sh ghcr.io/ggml-org/llama.cpp:server-cuda -c \
-      'exec /app/llama-server -hf ggml-org/Clef-Flash-GGUF:Q4_K_M --host 0.0.0.0 --port 8080 -c 32768 -ngl 99 -b 32768 -ub 4096'
+For this machine, `make deploy` installs e-jev as a systemd --user unit under `~/.config/compose`, reading the house
+vLLM (Gemma 4 26B-A4B); the GPU backends are installed, never enabled, and `gpu-*` switches e-jev to them:
 
-and tell jev the fleet: `JEV_BACKENDS='[{"id":"clef","kind":"systemone","url":"http://clef:8080"}]'`
-(`JEV_ROWS` optionally orders routes per question kind; the first reachable route that fits the shape
-answers, failures fall down the row).
+    make gpu-teach    # default: vLLM on the card, ejev reads it
+    make gpu-h2o      # H2O-Lightning-4B on the card, vLLM stopped, e-jev answers through it
+    make gpu-decide   # Clef-Flash on the card, vLLM stopped
 
-For this machine, `make deploy` installs everything as systemd --user units under `~/.config/compose`:
-
-| Service | Port | Role |
-|---|---|---|
-| jev | 45160 | System One API — routing, calibration, traces |
-| clef | 45164 | Clef-Flash Q4_K_M (llama.cpp, GGUF self-downloads) |
-| vllm | 45100 | Qwen3.6-27B AWQ — teacher: `extract`, states > ~4k tokens, distillation |
-| n8n / phoenix | 45700 / 45900 | optional UI and traces |
-
-One 24 GB card holds clef (6.9) **or** the 27B teacher (21.6), not both:
-
-    make gpu-decide   # clef + jev (vllm stopped) — even with the reader configured
-    make gpu-teach    # vllm + jev (clef stopped) — extraction, long context, refitting
-
-A backend that is down degrades to a failing route: the fleet boots and serves what it can; `/ready`
-reports the survivors. `JEV_DECISION_LOG` records every answered question (state, scores, backend) as
-JSONL — the corpus the distillation loop trains faster heads from.
+A backend that is down degrades to a failing route: the fleet boots and serves what it can, and reopens a backend
+once its server returns. `JEV_DECISION_LOG` records every answered question (state, scores, backend) as JSONL — the
+corpus the distillation loop trains faster heads from.
 
 ## API
 
@@ -80,8 +74,8 @@ Capacity answers 429/529 (what the official SDKs retry), never 502.
     from typesafe_sdk import Choice, TypeSafeClient
     client = TypeSafeClient(api_key="local", base_url="http://localhost:45160")
 
-`ejev-mcp` (also `src/e_jev/mcp.py`) mounts the same decisions as MCP tools — noul, choice, score,
-models — for Claude Code, OpenCode and OpenHuman over stdio.
+`ejev-mcp` (`src/e_jev/mcp/server.py`) mounts the same decisions as MCP tools — noul, choice, score, models — for
+Claude Code, OpenCode and OpenHuman over stdio, against `JEV_CLI_URL`.
 
 ## CLI
 
@@ -90,11 +84,12 @@ models — for Claude Code, OpenCode and OpenHuman over stdio.
     ejev noul "Is this urgent?" --state "Checkout is down, we lose orders"
     ejev choice "Which team?" "billing=Charges, refunds" "technical=Bugs" sales --state @ticket.txt
     ejev --json ask request.json
-    ejev calibrate .cache/labeled.jsonl --backend clef   # per-backend fit, merged into the file
+    ejev calibrate .cache/labeled.jsonl --backend h2o-lightning-4b   # per-backend fit, merged into the file
+    ejev pull h2o-lightning-4b                                        # a catalog backend's weights into JEV_MODELS_DIR
 
 ## Consumers verified
 
-`examples/triage/graph.py` (Pydantic AI + pydantic-graph) — `make integration` and `make graph`;
+`tests/integration/scenarios/triage/graph.py` (Pydantic AI + pydantic-graph) — `make integration` and `make graph`;
 n8n's official TypeSafe node — `make ui`; **jevgrep**: `jg auth --provider custom --base-url
 http://localhost:45160/v1 --model jev-latest`, semantic search in ~2 s at its own c32; **pg-jev**:
 `SET jev.api_url='http://jev:45160/v1/systemone'` inside Postgres (the setting takes the full endpoint) (plpython3u).
@@ -102,29 +97,37 @@ http://localhost:45160/v1 --model jev-latest`, semantic search in ~2 s at its ow
 ## Calibrate
 
 One temperature per **(backend, kind)** — thresholds do not transfer across backends. `make calibrate`
-fits the teacher, `ejev calibrate --backend clef` the decision model; the default set is BoolQ, AG News,
+fits the reader, `ejev calibrate --backend h2o-lightning-4b` a decision model; the default set is BoolQ, AG News,
 Banking77 (77-way), SST-5 plus a Spanish set (MASSIVE es-ES, XNLI es, tweet sentiment), each example in a
 stable half: fit or held out. Every number reported comes from the held-out half. The bake-off table —
 all measured candidates, quality and memory — lives in [docs/evals.md](docs/evals.md).
 
 ## Tuning
 
-je v: `JEV_BACKENDS` / `JEV_ROWS` (JSON: the fleet and its preference rows), `JEV_PERMUTATIONS` (1; 2
-averages both option orders on the reader), `JEV_CONCURRENCY` (16), `JEV_API_KEY`, `JEV_CALIBRATION`,
-`JEV_DECISION_LOG`, `JEV_OTLP_ENDPOINT`. clef: `CLEF_CTX` (32768), `CLEF_UBATCH` (4096 — the decision
-head needs the whole prompt in one batch), `CLEF_BATCH`. vllm: `VLLM_MODEL`, `VLLM_MAX_MODEL_LEN`
-(32768 = TypeSafe's contract ceiling), `VLLM_GPU_UTIL` (0.93).
+e-jev: `JEV_BACKENDS` (the catalog choice), `JEV_ROWS` (JSON: a preference row per question kind), the endpoints
+(`JEV_READING_URL` / `_MODEL` / `_KEY` / `_PRIORITY` — vLLM priority scheduling, `JEV_SYSTEMONE_URL` / `_KEY`,
+`JEV_H2O_URL`, `JEV_CLEF_URL`), `JEV_PERMUTATIONS` (1; 2 averages both option orders on the reader), `JEV_API_KEY`,
+`JEV_CALIBRATION`, `JEV_DECISION_LOG`, `JEV_MODELS_DIR`, `JEV_OTLP_ENDPOINT`. H2O: `H2O_GPU_UTIL` (0.85 of the whole
+card), `H2O_MAX_LEN` (32768), `H2O_TWO_WAY` (1). Clef: `CLEF_CTX` (32768), `CLEF_UBATCH` (4096 — the decision head
+needs the whole prompt in one batch), `CLEF_BATCH`.
 
 ## Benchmark
 
-Against TypeSafe's published runs on the same cases: the decision model is not merely cheaper than the
-generative reader — it is **better** (0.639 vs 0.573 vs Jev's 0.583), at ⅓ the VRAM and 5× the speed.
-Reproduce with `make evals`; the full bake-off: `docs/evals.md` and `.reports/`.
+Bake-off 2026-11-10, every backend alone on one RTX 4090, the same harness (`docs/evals.md`, raw runs in
+`.reports/2026-11-10_backends/`):
+
+| backend | WorkflowEvals (48 cases) | Banking77 | MASSIVE es-20 | p95 at c32 | decisions/s at c32 |
+|---|---|---|---|---|---|
+| `reading` on Gemma 4 26B-A4B | **0.625** | 0.78 | 0.86 | 0.66 s | 93 |
+| `h2o-lightning-4b` two-way | 0.549 | 0.94 | 0.86 | 1.03 s | 58 |
+| `clef-flash` as deployed (`-ub 4096`) | 0.451 (no invoice state fits) | **0.96** | **0.95** | 2.62 s | 22 |
+| Torchcast Decision 4B (rejected) | 0.500 | 0.79 | 0.87 | 2.30 s | 36 |
+
+Jev 1.13 on the same cases: 0.583. At 12 cases per workflow, ±0.05 is one or two cases: noise, not a ranking.
 
 ## Differences from Jev
 
-- Long states (> ~4k tokens at default `CLEF_UBATCH`) route to the reader, which pays the generative
-  model's latency; Jev's own budget is not published.
+- Long states route by budget: Clef ~4k tokens, H2O and the reader 32k by default; Jev's own budget is not published.
 - `usage.output_tokens` counts forward passes on the reader, server-reported usage elsewhere.
 - Probabilities come from the trained decision model or a general instruct model; calibrate per backend
   before trusting thresholds tuned on Jev's.

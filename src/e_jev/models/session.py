@@ -1,4 +1,4 @@
-"""models.session: what one `ejev` invocation knows before its command runs."""
+"""models/session: what one `ejev` invocation knows before its command runs."""
 
 from dataclasses import dataclass
 

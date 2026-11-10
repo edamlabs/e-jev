@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 import msgspec
 import pytest
 
-from examples.triage.graph import TriageSettings
+from tests.integration.scenarios.triage.graph import TriageSettings
 
 pytestmark = pytest.mark.integration
 

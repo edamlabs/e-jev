@@ -1,4 +1,4 @@
-"""cli.commands.calibrate: fit one temperature per (backend, kind) on labeled JSONL, through that backend itself.
+"""cli/commands/calibrate: fit one temperature per (backend, kind) on labeled JSONL, through that backend itself.
 
 Runs where the fleet's settings live. The backend answers over the same Decider the service will use — the
 reading one still reads vLLM's raw logprobs, a native one answers with its published probabilities — so a
@@ -18,15 +18,15 @@ import msgspec
 from rich.console import Console
 from rich.table import Table
 
-from e_jev.adapters.fleet import open_decider
+from e_jev.api.lifespan.engines import openers, resolve
 from e_jev.cli.runtime.deps import Inject
 from e_jev.cli.views import HEADER
-from e_jev.core.errors import CliError
-from e_jev.core.settings import Settings
-from e_jev.logic.calibration import Scored, fit_kinds, split_held
-from e_jev.logic.primitives import index_label, render_json
+from e_jev.infra.settings import Settings
+from e_jev.logic.calibration.fit import Scored, fit_kinds, split_held
+from e_jev.logic.decision.answers import index_label
 from e_jev.models.calibration import Calibration, KindFit, Labeled
-from e_jev.models.systemone import QuestionKind
+from e_jev.models.error import CliError
+from e_jev.models.systemone import QuestionKind, render_json
 
 
 class BackendError(CliError):
@@ -46,18 +46,18 @@ async def calibrate(
 
     Args:
         file: JSONL, one labeled System One question per line.
-        backend: fleet id to fit, `reading` unless the bake-off named another.
+        backend: catalog name to fit, one of JEV_BACKENDS.
     """
     samples = tuple(msgspec.json.Decoder(Labeled).decode_lines(await asyncio.to_thread(file.read_bytes)))
-    spec = next((item for item in settings.backends if item.id == backend), None)
-    match spec:
+    backends = resolve(settings)
+    match next((item for item in backends if item.id == backend), None):
         case None:
-            message = f"backend {backend!r} is not in the fleet: {sorted(item.id for item in settings.backends)}"
+            message = f"backend {backend!r} is not in JEV_BACKENDS: {[item.id for item in backends]}"
             raise BackendError(message)
         case wanted:
             async with AsyncExitStack() as stack:
-                _, decider = await open_decider(stack, wanted, settings)
-                slots = asyncio.Semaphore(settings.concurrency)
+                decider = await openers((wanted,), settings)[wanted.id](stack)
+                slots = asyncio.Semaphore(wanted.concurrency)
 
                 async def one(sample: Labeled) -> tuple[Labeled, Scored]:
                     async with slots:
@@ -76,7 +76,7 @@ async def calibrate(
     rows = [scored for _, scored in answered]
     fit = fit_kinds(rows)
     entry = KindFit(
-        model=wanted.model or settings.model,
+        model=wanted.model or wanted.id,
         temperatures={QuestionKind(kind): value for kind, value in fit.temperatures.items()},
         ece_before={QuestionKind(kind): value for kind, value in fit.ece_before.items()},
         ece_after={QuestionKind(kind): value for kind, value in fit.ece_after.items()},
@@ -84,15 +84,15 @@ async def calibrate(
         fitted=sum(not row.held for row in rows),
         held_out=sum(row.held for row in rows),
     )
-    stored = Calibration.load(settings.calibration, settings.permutations)
+    stored = Calibration.load(settings.JEV_CALIBRATION, settings.JEV_PERMUTATIONS)
     merged = Calibration(
-        permutations=settings.permutations,
+        permutations=settings.JEV_PERMUTATIONS,
         backends=(stored.backends if stored else {}) | {backend: entry},
     )
-    await asyncio.to_thread(settings.calibration.write_bytes, msgspec.json.format(msgspec.json.encode(merged)))
+    await asyncio.to_thread(settings.JEV_CALIBRATION.write_bytes, msgspec.json.format(msgspec.json.encode(merged)))
     table = Table("kind", "temperature", "ECE before", "ECE after", box=None, header_style=HEADER)
     for kind, temperature in entry.temperatures.items():
         table.add_row(kind, f"{temperature:.3f}", f"{entry.ece_before[kind]:.3f}", f"{entry.ece_after[kind]:.3f}")
     console.print(table)
     console.print(", ".join(f"{source} {value:.1%}" for source, value in entry.accuracy.items()))
-    console.print(f"[green]✓[/] {backend}: fitted on {entry.fitted}, measured on {entry.held_out} held out · {settings.calibration}")
+    console.print(f"[green]✓[/] {backend}: fitted on {entry.fitted}, measured on {entry.held_out} held out · {settings.JEV_CALIBRATION}")

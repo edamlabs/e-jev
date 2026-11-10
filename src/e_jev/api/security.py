@@ -1,4 +1,4 @@
-"""api.security: TypeSafe's bearer contract — enforced only when an API key is configured."""
+"""api/security: TypeSafe's bearer contract — enforced only when an API key is configured."""
 
 from typing import Final
 
@@ -10,7 +10,7 @@ REFUSED: Final = "Missing or invalid API key."
 
 
 def bearer(connection: ASGIConnection, _: BaseRouteHandler) -> None:
-    match connection.app.state.settings.api_key:
+    match connection.app.state.settings.JEV_API_KEY:
         case None:
             return
         case expected if connection.headers.get("authorization") == f"Bearer {expected}":

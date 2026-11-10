@@ -1,4 +1,4 @@
-"""api.middlewares: the ASGI chain — every response carries the request id TypeSafe's SDKs read."""
+"""api/middlewares: the ASGI chain — every response carries the request id TypeSafe's SDKs read."""
 
 from functools import partial
 from typing import Final

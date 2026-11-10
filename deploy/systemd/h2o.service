@@ -1,0 +1,17 @@
+[Unit]
+Description=h2o via Docker Compose
+After=vllm.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/damien/.config/compose/h2o
+ExecStart=/usr/bin/docker compose up --remove-orphans
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose up -d --remove-orphans
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=1200
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

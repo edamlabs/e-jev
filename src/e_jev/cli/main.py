@@ -1,10 +1,10 @@
-"""ejev entrypoint: the command tree is two tables, and nothing under commands/ loads until it runs.
+"""cli/main: the `ejev` entrypoint — the command tree is two tables, and nothing under commands/ loads until it runs.
 
 `GROUPS` and `CARDS` are the whole surface — the e-cli shape. `build` turns them into cyclopts apps and
 mounts every card by its `module:function` string, so `ejev --help` loads no command. The meta app runs the
 `Launcher` first on every call: global options, the run's lifespan, injection by type, the error boundary.
 
-    ejev noul · choice · score · ask · models · calibrate
+    ejev noul · choice · score · ask · models · calibrate · pull
 """
 
 import sys
@@ -25,6 +25,7 @@ CARDS: tuple[CommandCard, ...] = (
     CommandCard(path="ask", target="e_jev.cli.commands.decide:ask", summary="Send a full request body from a JSON file."),
     CommandCard(path="models", target="e_jev.cli.commands.decide:listing", summary="Models the endpoint advertises."),
     CommandCard(path="calibrate", target="e_jev.cli.commands.calibrate:calibrate", summary="Fit the temperature (run in jev)."),
+    CommandCard(path="pull", target="e_jev.cli.commands.pull:pull", summary="Fetch the selected backends' weights from the Hub."),
 )
 
 

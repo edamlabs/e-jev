@@ -22,8 +22,8 @@ import httpx
 import msgspec
 import numpy as np
 
-from e_jev.logic.calibration import Scored, fit_kinds, split_held
-from e_jev.logic.primitives import index_label
+from e_jev.logic.calibration.fit import Scored, fit_kinds, split_held
+from e_jev.logic.decision.answers import index_label
 from e_jev.models.calibration import Labeled
 from e_jev.models.systemone import (
     Answer,
@@ -86,7 +86,7 @@ class Backend:
             async with sem:
                 try:
                     answer, _ = await self._open_answer(sample)
-                except (httpx.HTTPError, msgspec.DecodeError):
+                except httpx.HTTPError, msgspec.DecodeError:
                     return index, None
                 return index, (sample, answer)
 
@@ -104,7 +104,7 @@ class Backend:
                 async with gate:
                     try:
                         _, seconds = await self._open_answer(sample)
-                    except (httpx.HTTPError, msgspec.DecodeError):
+                    except httpx.HTTPError, msgspec.DecodeError:
                         return None
                     return sample.source, seconds
 
@@ -118,9 +118,7 @@ class Backend:
             out[f"c{conc}"] = {
                 "p50": float(np.percentile(values, 50)) if values else None,
                 "p95": float(np.percentile(values, 95)) if values else None,
-                "per_source": {
-                    source: percentile([value for item, value in times if item == source]) for source in sources
-                },
+                "per_source": {source: percentile([value for item, value in times if item == source]) for source in sources},
                 "throughput": len(times) / wall,
             }
         return out

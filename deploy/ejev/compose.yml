@@ -17,19 +17,19 @@ services:
     volumes:
       - ../data/ejev:/data
     environment:
-      - JEV_VLLM_URL=http://vllm:45100/v1
-      - JEV_VLLM_API_KEY=${VLLM_API_KEY:-local-dev}
-      - JEV_MODEL=${JEV_MODEL:-clef}
+      # e-jev = el lector sobre el vLLM de casa (Gemma 4 26B-A4B): bench 2026-11-10, WorkflowEvals 0.625, el mejor
+      # medido y el único que convive con el resto de la tarjeta. `make gpu-h2o` / `gpu-decide` escriben JEV_BACKENDS
+      # en el .env de este directorio y le dan la tarjeta al modelo de decisión; `make gpu-teach` lo borra.
+      - JEV_BACKENDS=${JEV_BACKENDS:-reading}
+      - JEV_READING_URL=http://vllm:45100/v1
+      - JEV_READING_KEY=${VLLM_API_KEY:-local-dev}
+      - JEV_READING_MODEL=${JEV_READING_MODEL:-gemma4-26b-a4b}
+      # vLLM corre con --scheduling-policy priority: jev es carga masiva, detrás de los clientes interactivos (0).
+      - JEV_READING_PRIORITY=${JEV_READING_PRIORITY:-10}
+      - JEV_H2O_URL=http://h2o:8741
+      - JEV_CLEF_URL=http://clef:8080
       - JEV_PERMUTATIONS=${JEV_PERMUTATIONS:-1}
       - JEV_OTLP_ENDPOINT=${JEV_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}
-      # e-jev = clef, por defecto y a secas (docs/evals.md §Decision backends): el modelo de decisión
-      # cubre todas las formas dentro de su presupuesto de batch (~4k tokens de estado) y todo el
-      # español medido. Un backend caído degrada a ruta que falla: jev arranca y sirve lo que puede.
-      # Para re-abrir la vía LLM (estados largos / extract), AÑADE la entrada reading a la lista y
-      # arranca su motor: `make gpu-teach` con vLLM, o un servidor con el dialecto del reader
-      # (/tokenize + /v1/completions con logprob_token_ids — ver brief strata). Sin esa entrada,
-      # jev es 100% clef: largo y extract responden 503/501, nunca silencio.
-      - JEV_BACKENDS=${JEV_BACKENDS:-[{"id":"clef","kind":"systemone","url":"http://clef:8080","model":"clef","languages":["any"],"max_options":255,"max_state_tokens":4096}]}
       - JEV_DECISION_LOG=${JEV_DECISION_LOG:-/data/decisions.jsonl}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:45160/ready')"]

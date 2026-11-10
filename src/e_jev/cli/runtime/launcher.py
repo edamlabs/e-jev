@@ -1,4 +1,4 @@
-"""cli.runtime.launcher: the meta command every invocation passes through — global options, the run, the boundary.
+"""cli/runtime/launcher: the meta command every invocation passes through — global options, the run, the boundary.
 
 cyclopts parses the global options here and hands the rest to the tree. `parse_args` returns the resolved
 command (lazily imported by then), its bound arguments and the parameters it declared as injected; the
@@ -16,9 +16,9 @@ from rich.markup import escape
 from typesafe_sdk import TypeSafeError
 
 from e_jev.cli.runtime.lifespan import lifespan
-from e_jev.core.errors import CliError
-from e_jev.core.settings import settings as st
+from e_jev.infra.settings import settings as st
 from e_jev.models.command import CommandCard
+from e_jev.models.error import CliError
 from e_jev.models.session import Session
 
 ENDPOINT_EXIT = 3
@@ -62,9 +62,9 @@ class Launcher:
     async def run(
         self,
         *tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen=True)],
-        url: str = st.cli_url,
-        key: str = st.cli_key,
-        model: str = st.cli_model,
+        url: str = st.JEV_CLI_URL,
+        key: str = st.JEV_CLI_KEY,
+        model: str = st.JEV_CLI_MODEL,
         seconds: Annotated[float, Parameter(name="--timeout")] = 60.0,
         json: bool = False,
         verbose: bool = False,

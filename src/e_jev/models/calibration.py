@@ -1,4 +1,4 @@
-"""models.calibration: labeled examples in, one fitted temperature per (backend, kind) out — bound to its fleet.
+"""models/calibration: labeled examples in, one fitted temperature per (backend, kind) out — bound to its fleet.
 
 A fit is per backend because thresholds tuned on one never transfer to another — and it names the model it
 was fitted ON, because a route pointed at a different model must not inherit its temperatures. The engine
@@ -9,12 +9,10 @@ from pathlib import Path
 from typing import Self
 
 import msgspec
-import structlog
 from msgspec import Struct
 
+from e_jev.infra.logger import logger
 from e_jev.models.systemone import Json, Question, QuestionKind
-
-log = structlog.get_logger()
 
 
 class Labeled(Struct, frozen=True):
@@ -50,17 +48,17 @@ class Calibration(Struct, frozen=True):
         try:
             stored = msgspec.json.decode(path.read_bytes(), type=cls) if path.is_file() else None
         except (msgspec.ValidationError, OSError) as error:
-            log.warning("calibration_unreadable", path=str(path), error=str(error)[:160])
+            logger.warning("calibration unreadable", path=str(path), error=str(error)[:160])
             return None
         match stored:
             case Calibration(permutations=fit_permutations) if fit_permutations == permutations:
-                log.info("calibration_loaded", fitted={b: f.model for b, f in stored.backends.items()})
+                logger.info("calibration loaded", fitted={b: f.model for b, f in stored.backends.items()})
                 return stored
             case Calibration():
-                log.warning("calibration_stale", fitted_permutations=stored.permutations, permutations=permutations)
+                logger.warning("calibration stale", fitted_permutations=stored.permutations, permutations=permutations)
                 return None
             case None:
-                log.warning("calibration_missing", path=str(path))
+                logger.warning("calibration missing", path=str(path))
                 return None
 
     def temperature(self, backend: str, model: str, kind: QuestionKind) -> float:
@@ -69,7 +67,7 @@ class Calibration(Struct, frozen=True):
             case KindFit(model=fitted_model, temperatures=fitted) if fitted_model == model:
                 return fitted.get(kind, 1.0)
             case KindFit(model=fitted_model):
-                log.warning("calibration_model_mismatch", backend=backend, fitted=fitted_model, served=model)
+                logger.warning("calibration model mismatch", backend=backend, fitted=fitted_model, served=model)
                 return 1.0
             case None:
                 return 1.0

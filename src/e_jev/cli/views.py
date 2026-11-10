@@ -1,4 +1,4 @@
-"""cli.views: a System One response for the terminal — one row per answer, the distribution as bars. Pure rendering."""
+"""cli/views: a System One response for the terminal — one row per answer, the distribution as bars. Pure rendering."""
 
 from typing import Final
 

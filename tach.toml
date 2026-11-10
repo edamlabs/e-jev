@@ -8,8 +8,10 @@ exact = true
 root_module = "forbid"
 
 ##### LAYERS #####
-### Ordered high → low: a layer may import lower layers, importing upward fails.
-layers = ["entry", "api", "operational", "adapters", "logic", "core", "models"]
+### Ordered high → low: a layer may import lower layers, importing upward fails. The doors (entry, api) and the
+### composition roots inside them are the only modules that name a concretion; engines and providers meet only through
+### ports; the core of infra (errors, logger) sits under everything, its settings above the contracts they type.
+layers = ["entry", "api", "logic", "engines", "providers", "ports", "config", "models", "ops", "infra"]
 
 ##### MODULES #####
 [[modules]]
@@ -33,51 +35,96 @@ layer = "api"
 depends_on = []
 
 [[modules]]
-path = "e_jev.operational"
-layer = "operational"
+path = "e_jev.api.lifespan"
+layer = "api"
 depends_on = []
 
 [[modules]]
-path = "e_jev.adapters.ports"
-layer = "adapters"
-depends_on = []
+path = "e_jev.logic.decision"
+layer = "logic"
+depends_on = ["e_jev.logic.calibration"]
 
 [[modules]]
-path = "e_jev.adapters.reader"
-layer = "adapters"
-depends_on = []
-
-[[modules]]
-path = "e_jev.adapters.decider"
-layer = "adapters"
-depends_on = ["e_jev.adapters.ports"]
-
-[[modules]]
-path = "e_jev.adapters.sink"
-layer = "adapters"
-depends_on = []
-
-[[modules]]
-path = "e_jev.adapters.fleet"
-layer = "adapters"
-depends_on = ["e_jev.adapters.ports", "e_jev.adapters.reader", "e_jev.adapters.decider"]
-
-[[modules]]
-path = "e_jev.logic"
+path = "e_jev.logic.readout"
 layer = "logic"
 depends_on = []
 
 [[modules]]
-path = "e_jev.core"
-layer = "core"
-depends_on = ["e_jev.config"]
+path = "e_jev.logic.calibration"
+layer = "logic"
+depends_on = []
 
 [[modules]]
-path = "e_jev.config"
-layer = "core"
+path = "e_jev.engines"
+layer = "engines"
 depends_on = []
+
+[[modules]]
+path = "e_jev.providers"
+layer = "providers"
+depends_on = []
+
+[[modules]]
+path = "e_jev.ports"
+layer = "ports"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.providers"
+layer = "config"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.logic"
+layer = "config"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.api"
+layer = "config"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.cli"
+layer = "config"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.settings"
+layer = "config"
+depends_on = ["e_jev.infra.config.providers", "e_jev.infra.config.logic", "e_jev.infra.config.api", "e_jev.infra.config.cli"]
 
 [[modules]]
 path = "e_jev.models"
 layer = "models"
 depends_on = []
+
+[[modules]]
+path = "e_jev.ops"
+layer = "ops"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.errors"
+layer = "infra"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.logger"
+layer = "infra"
+depends_on = ["e_jev.infra.proxy", "e_jev.infra.config.infra"]
+
+[[modules]]
+path = "e_jev.infra.proxy"
+layer = "infra"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.base"
+layer = "infra"
+depends_on = []
+
+[[modules]]
+path = "e_jev.infra.config.infra"
+layer = "infra"
+depends_on = ["e_jev.infra.config.base"]

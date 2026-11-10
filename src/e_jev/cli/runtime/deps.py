@@ -1,4 +1,4 @@
-"""cli.runtime.deps: injection by declared type — built on demand, once per run, closed by the run's stack.
+"""cli/runtime/deps: injection by declared type — built on demand, once per run, closed by the run's stack.
 
 `Inject[T]` marks a parameter cyclopts must not parse; the launcher resolves each from its type through
 `Deps.PROVIDERS`. The TypeSafe client opens only for a command that asks for it, on the run's exit stack."""
@@ -13,8 +13,8 @@ from rich.console import Console
 from typesafe_sdk import AsyncTypeSafeClient
 
 from e_jev.cli.services.decide import DecideService
-from e_jev.core.settings import Settings
-from e_jev.core.settings import settings as st
+from e_jev.infra.settings import Settings
+from e_jev.infra.settings import settings as st
 from e_jev.models.session import Session
 
 T = TypeVar("T")

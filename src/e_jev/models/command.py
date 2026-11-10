@@ -1,4 +1,4 @@
-"""models.command: the command tree as data — groups and cards the root reads before any command module loads."""
+"""models/command: the command tree as data — groups and cards the root reads before any command module loads."""
 
 from dataclasses import dataclass
 
