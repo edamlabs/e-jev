@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- README: what H2O-Lightning-4B needs on a GPU (driver ≥ R580 for the CUDA 13 engine, VRAM, ~40 GB of disk, build,
+  pull and first-start times measured on the 4090) and the commands to bring it up and ask it.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added

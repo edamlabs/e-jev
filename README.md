@@ -41,6 +41,34 @@ warms up (H2O: minutes — its `/health` answers 503 until every path is warmed)
 NVIDIA container toolkit, Compose ≥ 2.20; H2O's engine image is built locally (vLLM 0.30.0 + H2O's two-way fork,
 checked file by file against the sums the model ships).
 
+### H2O-Lightning-4B on your GPU
+
+What it needs, measured on an RTX 4090 (24 GB) on 2026-11-10:
+
+- **NVIDIA driver ≥ R580** (the engine image is vLLM 0.30.0 on CUDA 13.0), Docker with the NVIDIA container toolkit,
+  Compose ≥ 2.20.
+- **The card to itself.** Weights 9.3 GB; vLLM takes `H2O_GPU_UTIL` (0.85) of the whole card for weights and KV.
+  On a 16 GB card lower `H2O_MAX_LEN` (16384) before lowering `H2O_GPU_UTIL`; vLLM refuses to start when the share
+  it asks for is not free.
+- **~40 GB of disk**: the engine image (~31 GB, built locally) and the snapshot (8.7 GB, in the `models` volume).
+- **Time**: the build takes ~6 min, `ejev pull` ~4 min (no `HF_TOKEN` needed; set one for faster, unthrottled
+  downloads). The first start compiles CUDA graphs and warms every path — several minutes; later starts reuse the
+  `h2o-cache` volume (85 s measured).
+
+```
+cp .env.example .env                       # JEV_BACKENDS=h2o-lightning-4b, as shipped
+docker compose up -d --build
+docker compose logs -f h2o                 # wait for "H2O-Lightning-4B ready on …"
+curl -s localhost:45160/ready              # {"status":"ready","backends":{"h2o-lightning-4b":"up"}}
+curl -s localhost:45160/v1/systemone -H 'content-type: application/json' -d '{
+  "state": "I was charged twice for my invoice, refund me",
+  "questions": {"team": {"type": "choice", "instructions": "Which team?",
+                         "criteria": {"billing": "payments, refunds", "tech": "bugs, outages"}}}}'
+```
+
+`H2O_TWO_WAY=0` serves one-way attention (stock behaviour, slightly faster, a little lower on Spanish in our bench).
+Answers are H2O's own calibration until you fit e-jev's: `ejev calibrate FILE --backend h2o-lightning-4b`.
+
 For this machine, `make deploy` installs e-jev as a systemd --user unit under `~/.config/compose`, reading the house
 vLLM (Gemma 4 26B-A4B); the GPU backends are installed, never enabled, and `gpu-*` switches e-jev to them:
 
